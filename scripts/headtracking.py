@@ -6,11 +6,7 @@ df, OUT = load_and_setup()
 
 import matplotlib.pyplot as plt
 import seaborn as sns
-from importlib.machinery import SourceFileLoader
-mod = SourceFileLoader('ld', os.path.join(os.path.dirname(__file__), '01_load_data.py')).load_module()
-VIDEOS = mod.VIDEOS
-VIDEO_NAMES = mod.VIDEO_NAMES
-PHQ_ORDER = mod.PHQ_ORDER
+from load_data import VIDEOS, VIDEO_NAMES, PHQ_ORDER
 
 # ── Figure 7: Total Speed by PHQ-9 Group ─────────────────────────────────
 speed_cols = [f'speed_total_{v}' for v in VIDEOS]

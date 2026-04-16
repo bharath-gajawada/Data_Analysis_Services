@@ -8,11 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
-from importlib.machinery import SourceFileLoader
-mod = SourceFileLoader('ld', os.path.join(os.path.dirname(__file__), '01_load_data.py')).load_module()
-VIDEOS = mod.VIDEOS
-VIDEO_SHORT = mod.VIDEO_SHORT
-PHQ_ORDER = mod.PHQ_ORDER
+from load_data import VIDEOS, VIDEO_SHORT, PHQ_ORDER
 
 # ── Figure 10: Correlation Heatmap ───────────────────────────────────────
 corr_vars = ['score_phq', 'score_gad', 'score_stai_t', 'avg_speed', 'avg_speed_y']

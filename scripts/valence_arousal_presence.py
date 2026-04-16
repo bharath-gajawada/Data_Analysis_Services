@@ -6,10 +6,7 @@ df, OUT = load_and_setup()
 
 import numpy as np
 import matplotlib.pyplot as plt
-from importlib.machinery import SourceFileLoader
-mod = SourceFileLoader('ld', os.path.join(os.path.dirname(__file__), '01_load_data.py')).load_module()
-VIDEOS = mod.VIDEOS
-VIDEO_NAMES = mod.VIDEO_NAMES
+from load_data import VIDEOS, VIDEO_NAMES
 
 x = np.arange(5)
 xlbl = [VIDEO_NAMES[v] for v in VIDEOS]
