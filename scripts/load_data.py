@@ -12,6 +12,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
+import re
 
 # ── Style ────────────────────────────────────────────────────────────────
 sns.set_theme(style="whitegrid", font_scale=1.1)
@@ -60,6 +61,67 @@ def distress_group(row):
     else: return 'None'
 
 
+def _coerce_numeric_tail(values):
+    numeric_values = []
+    for value in values:
+        try:
+            numeric_values.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    return numeric_values
+
+
+def _extract_footer_stats(fpath):
+    """Read precomputed summary statistics from the footer of a headtracking file.
+
+    Returns a dictionary with the same metrics used by the manual aggregation path,
+    or None when the file does not contain the expected summary footer.
+    """
+    try:
+        with open(fpath, 'r', encoding='utf-8-sig', errors='ignore') as handle:
+            lines = [line.strip() for line in handle if line.strip()]
+    except OSError:
+        return None
+
+    if not lines:
+        return None
+
+    footer_line = next((line for line in reversed(lines)
+                        if 'Rotation Speed Averages' in line or 'Circular Averages' in line), None)
+    if footer_line is None:
+        return None
+
+    labels = ['Circular Averages', 'Standard Deviations', 'Rotation Speed Averages']
+    parts = re.split(r'(Circular Averages|Standard Deviations|Rotation Speed Averages)', footer_line)
+    footer_map = {}
+    current_label = None
+
+    for part in parts:
+        if part in labels:
+            current_label = part
+            footer_map[current_label] = []
+            continue
+        if current_label is not None:
+            footer_map[current_label].extend(_coerce_numeric_tail(re.split(r'[\s,;]+', part.strip())))
+
+    speed_values = footer_map.get('Rotation Speed Averages', [])
+    circular_values = footer_map.get('Circular Averages', [])
+    std_values = footer_map.get('Standard Deviations', [])
+
+    if len(speed_values) < 4 or len(circular_values) < 3 or len(std_values) < 3:
+        return None
+
+    return {
+        'speed_total': speed_values[0],
+        'speed_x': speed_values[1],
+        'speed_y': speed_values[2],
+        'speed_z': speed_values[3],
+        'sd_rot_x': std_values[0],
+        'sd_rot_y': std_values[1],
+        'sd_rot_z': std_values[2],
+    }
+
+
 # ── Load & preprocess ────────────────────────────────────────────────────
 def load_data():
     """Load survey + headtracking data, merge, apply groupings. Returns the merged DataFrame."""
@@ -75,6 +137,11 @@ def load_data():
             fpath = os.path.join(HT_DIR, v, str(fname))
             if not os.path.exists(fpath): continue
             try:
+                summary_stats = _extract_footer_stats(fpath)
+                if summary_stats is not None:
+                    ht_rows.append({'participant': pid, 'video': v, **summary_stats})
+                    continue
+
                 ht = pd.read_csv(fpath, on_bad_lines='skip')
                 if 'RotationSpeedTotal' not in ht.columns: continue
                 ht_rows.append({

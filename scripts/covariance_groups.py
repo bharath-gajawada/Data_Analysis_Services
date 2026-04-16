@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
+from stats_helpers import adaptive_correlation
 
 # ── Figure 3: Covariance scatter ─────────────────────────────────────────
 fig, ax = plt.subplots(figsize=(7, 6))
@@ -17,8 +18,16 @@ plt.colorbar(scatter, ax=ax, label='STAI-T (Trait Anxiety)')
 m, b = np.polyfit(df['score_phq'], df['score_gad'], 1)
 x_line = np.linspace(0, 20, 50)
 ax.plot(x_line, m*x_line + b, 'r--', lw=2)
-r, p = stats.pearsonr(df['score_phq'], df['score_gad'])
-ax.set_title(f'Figure 3: Depression × Anxiety Covariance\nPearson r = {r:.3f}, p < .001', fontweight='bold')
+result = adaptive_correlation(df['score_phq'], df['score_gad'])
+ci_text = ''
+if np.all(np.isfinite(result['ci'])):
+    ci_text = f', 95% CI [{result["ci"][0]:.3f}, {result["ci"][1]:.3f}]'
+metric_label = 'r' if result['test'] == 'pearson' else 'rho'
+ax.set_title(
+    f'Figure 3: Depression × Anxiety Covariance\n'
+    f'{result["test"]} {metric_label} = {result["stat"]:.3f}, p = {result["p"]:.4f}{ci_text}',
+    fontweight='bold'
+)
 ax.set_xlabel('PHQ-9 (Depression)'); ax.set_ylabel('GAD-7 (Anxiety)')
 ax.axvline(4.5, color='gray', ls=':', alpha=0.5); ax.axhline(4.5, color='gray', ls=':', alpha=0.5)
 ax.axvline(9.5, color='gray', ls=':', alpha=0.5); ax.axhline(9.5, color='gray', ls=':', alpha=0.5)

@@ -9,6 +9,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from load_data import VIDEOS, VIDEO_SHORT, PHQ_ORDER
+from stats_helpers import (
+    adaptive_correlation,
+    adaptive_paired_test,
+    adaptive_two_group_test,
+    benjamini_hochberg,
+    shapiro_safe,
+)
 
 # ── Figure 10: Correlation Heatmap ───────────────────────────────────────
 corr_vars = ['score_phq', 'score_gad', 'score_stai_t', 'avg_speed', 'avg_speed_y']
@@ -35,54 +42,104 @@ desc = df[['age', 'score_phq', 'score_gad', 'score_stai_t', 'score_vrise',
            'positive_affect_end', 'negative_affect_end', 'avg_speed', 'avg_speed_y']].describe().round(2)
 print(desc.to_string())
 
-# Pearson correlations
-print("\n--- Pearson Correlations ---")
+# Correlations with normality checks
+print("\n--- Correlations with normality checks ---")
 pairs = [('score_phq', 'score_gad'), ('score_phq', 'score_stai_t'),
          ('score_phq', 'avg_speed'), ('score_phq', 'avg_speed_y'),
          ('score_gad', 'avg_speed'), ('score_gad', 'avg_speed_y'),
          ('score_stai_t', 'avg_speed'), ('score_stai_t', 'avg_speed_y')]
+corr_results = []
 for a, b in pairs:
     tmp = df[[a, b]].dropna()
-    r, p = stats.pearsonr(tmp[a], tmp[b])
-    print(f"  {a} vs {b}: r={r:.3f}, p={p:.4f}")
+    result = adaptive_correlation(tmp[a], tmp[b])
+    corr_results.append((a, b, result))
 
-# T-tests: Minimal vs Moderate-Severe
-print("\n--- T-tests: Minimal vs Moderate-Severe Depression (Total Speed) ---")
+raw_corr_p = [result['p'] for _, _, result in corr_results]
+corr_q = benjamini_hochberg(raw_corr_p)
+for (a, b, result), q in zip(corr_results, corr_q):
+    stat_name = 'r' if result['test'] == 'pearson' else 'rho'
+    ci_text = ''
+    if np.all(np.isfinite(result['ci'])):
+        ci_text = f", 95% CI [{result['ci'][0]:.3f}, {result['ci'][1]:.3f}]"
+    print(
+        f"  {a} vs {b}: {result['test']} {stat_name}={result['stat']:.3f}, "
+        f"p={result['p']:.4f}, q={q:.4f}{ci_text}, "
+        f"Shapiro p=({result['normal'][0]:.3f}, {result['normal'][1]:.3f})"
+    )
+
+# Two-group comparisons with assumption checks
+print("\n--- Two-group comparisons with assumption checks ---")
 df_min = df[df['phq_group'] == 'Minimal (0-4)']
 df_mod = df[df['phq_group'] == 'Moderate-Severe (≥10)']
+speed_tests = []
 for v in VIDEOS:
     col = f'speed_total_{v}'
     a = df_mod[col].dropna(); b = df_min[col].dropna()
     if len(a) < 2 or len(b) < 2:
         print(f"  {VIDEO_SHORT[v]}: insufficient data"); continue
-    t, p = stats.ttest_ind(a, b, equal_var=False)
-    d = (a.mean()-b.mean()) / np.sqrt((a.std()**2+b.std()**2)/2) if (a.std()+b.std()) > 0 else 0
-    print(f"  {VIDEO_SHORT[v]}: Mod M={a.mean():.2f} SD={a.std():.2f}, "
-          f"Min M={b.mean():.2f} SD={b.std():.2f}, t={t:.2f}, p={p:.4f}, d={d:.3f}")
+    result = adaptive_two_group_test(a, b)
+    speed_tests.append((v, 'total', result))
+    ci_text = ''
+    if np.all(np.isfinite(result['ci'])):
+        ci_text = f", 95% CI [{result['ci'][0]:.3f}, {result['ci'][1]:.3f}]"
+    print(
+        f"  {VIDEO_SHORT[v]}: {result['test']} stat={result['stat']:.2f}, p={result['p']:.4f}{ci_text}, "
+        f"normality p=({result['normal'][0]:.3f}, {result['normal'][1]:.3f})"
+    )
 
 # Yaw speed t-tests
-print("\n--- T-tests: Yaw Speed Minimal vs Moderate-Severe ---")
+print("\n--- Yaw speed comparisons with assumption checks ---")
+yaw_tests = []
 for v in VIDEOS:
     col = f'speed_y_{v}'
     a = df_mod[col].dropna(); b = df_min[col].dropna()
     if len(a) < 2 or len(b) < 2:
         print(f"  {VIDEO_SHORT[v]}: insufficient data"); continue
-    t, p = stats.ttest_ind(a, b, equal_var=False)
-    d = (a.mean()-b.mean()) / np.sqrt((a.std()**2+b.std()**2)/2) if (a.std()+b.std()) > 0 else 0
-    print(f"  {VIDEO_SHORT[v]}: Mod M={a.mean():.2f}, Min M={b.mean():.2f}, t={t:.2f}, p={p:.4f}, d={d:.3f}")
+    result = adaptive_two_group_test(a, b)
+    yaw_tests.append((v, 'yaw', result))
+    ci_text = ''
+    if np.all(np.isfinite(result['ci'])):
+        ci_text = f", 95% CI [{result['ci'][0]:.3f}, {result['ci'][1]:.3f}]"
+    print(
+        f"  {VIDEO_SHORT[v]}: {result['test']} stat={result['stat']:.2f}, p={result['p']:.4f}{ci_text}, "
+        f"normality p=({result['normal'][0]:.3f}, {result['normal'][1]:.3f})"
+    )
 
-# Kruskal-Wallis
-print("\n--- Kruskal-Wallis: Speed across 3 PHQ groups ---")
+speed_q = benjamini_hochberg([result['p'] for _, _, result in speed_tests])
+yaw_q = benjamini_hochberg([result['p'] for _, _, result in yaw_tests])
+if len(speed_tests) > 0:
+    print("\n  FDR-adjusted q-values for total speed:")
+    for (v, _, result), q in zip(speed_tests, speed_q):
+        print(f"    {VIDEO_SHORT[v]}: p={result['p']:.4f}, q={q:.4f}")
+if len(yaw_tests) > 0:
+    print("\n  FDR-adjusted q-values for yaw speed:")
+    for (v, _, result), q in zip(yaw_tests, yaw_q):
+        print(f"    {VIDEO_SHORT[v]}: p={result['p']:.4f}, q={q:.4f}")
+
+# Three-group comparisons with assumption checks
+print("\n--- Three-group comparisons with assumption checks ---")
 groups_data = [df[df['phq_group']==g]['avg_speed'].dropna() for g in PHQ_ORDER]
 groups_data = [g for g in groups_data if len(g) > 0]
 if len(groups_data) >= 2:
-    h, p = stats.kruskal(*groups_data)
-    print(f"  Total Speed: H={h:.2f}, p={p:.4f}")
+    normal_p = [shapiro_safe(g) for g in groups_data]
+    levene_p = stats.levene(*groups_data, center='median').pvalue if len(groups_data) >= 2 else np.nan
+    if all(np.isfinite(p) and p >= 0.05 for p in normal_p) and (not np.isfinite(levene_p) or levene_p >= 0.05):
+        f_stat, p = stats.f_oneway(*groups_data)
+        print(f"  Total Speed: one-way ANOVA F={f_stat:.2f}, p={p:.4f}, Levene p={levene_p:.4f}, Shapiro p={normal_p}")
+    else:
+        h, p = stats.kruskal(*groups_data)
+        print(f"  Total Speed: Kruskal-Wallis H={h:.2f}, p={p:.4f}, Levene p={levene_p:.4f}, Shapiro p={normal_p}")
 groups_y = [df[df['phq_group']==g]['avg_speed_y'].dropna() for g in PHQ_ORDER]
 groups_y = [g for g in groups_y if len(g) > 0]
 if len(groups_y) >= 2:
-    h, p = stats.kruskal(*groups_y)
-    print(f"  Yaw Speed: H={h:.2f}, p={p:.4f}")
+    normal_p = [shapiro_safe(g) for g in groups_y]
+    levene_p = stats.levene(*groups_y, center='median').pvalue if len(groups_y) >= 2 else np.nan
+    if all(np.isfinite(p) and p >= 0.05 for p in normal_p) and (not np.isfinite(levene_p) or levene_p >= 0.05):
+        f_stat, p = stats.f_oneway(*groups_y)
+        print(f"  Yaw Speed: one-way ANOVA F={f_stat:.2f}, p={p:.4f}, Levene p={levene_p:.4f}, Shapiro p={normal_p}")
+    else:
+        h, p = stats.kruskal(*groups_y)
+        print(f"  Yaw Speed: Kruskal-Wallis H={h:.2f}, p={p:.4f}, Levene p={levene_p:.4f}, Shapiro p={normal_p}")
 
 # Outlier check
 print("\n--- Outlier Check (|z| > 3) ---")
@@ -91,11 +148,14 @@ for name, col in [('PHQ-9', 'score_phq'), ('GAD-7', 'score_gad'), ('STAI-T', 'sc
     print(f"  {name}: {(z>3).sum()} outlier(s)")
 
 # PANAS
-print("\n--- PANAS Paired t-tests ---")
-t1, p1 = stats.ttest_rel(df['positive_affect_start'], df['positive_affect_end'])
-t2, p2 = stats.ttest_rel(df['negative_affect_start'], df['negative_affect_end'])
-print(f"  Positive Affect: t={t1:.2f}, p={p1:.4f}")
-print(f"  Negative Affect: t={t2:.2f}, p={p2:.4f}")
+print("\n--- PANAS paired comparisons with assumption checks ---")
+pa_result = adaptive_paired_test(df['positive_affect_start'], df['positive_affect_end'])
+na_result = adaptive_paired_test(df['negative_affect_start'], df['negative_affect_end'])
+for label, result in [('Positive Affect', pa_result), ('Negative Affect', na_result)]:
+    ci_text = ''
+    if np.all(np.isfinite(result['ci'])):
+        ci_text = f", 95% CI [{result['ci'][0]:.3f}, {result['ci'][1]:.3f}]"
+    print(f"  {label}: {result['test']} stat={result['stat']:.2f}, p={result['p']:.4f}{ci_text}, normality p={result['normal']:.3f}")
 
 # Sample size
 print(f"\n--- Sample Size ---")
